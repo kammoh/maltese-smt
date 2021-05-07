@@ -6,7 +6,7 @@
 
 package maltese.smt.solvers
 
-import com.sun.jna.{Library, Native, NativeLibrary, Pointer}
+import com.sun.jna.{Library, Native, NativeLibrary, Pointer, Platform}
 import com.sun.jna.ptr.{IntByReference, LongByReference}
 
 trait Yices2Api extends Library {
@@ -176,6 +176,8 @@ trait Yices2Api extends Library {
 }
 
 object Yices2Api {
+  val libName = "yices"
+
   case class Info(Version: String, BuildArch: String, BuildMode: String, BuildDate: String)
   def getInfo(): Info = {
     val lib = NativeLibrary.getInstance("yices")
@@ -223,7 +225,8 @@ object Yices2Api {
   }
 
   def load(): Yices2Api = {
-    val yices_lib = Native.load("yices", classOf[Yices2Api])
+    NativeLibrary.addSearchPath(libName, Paths.get("lib", Platform.RESOURCE_PREFIX).toAbsolutePath().toString())
+    val yices_lib = Native.load(libName, classOf[Yices2Api])
     yices_lib.yices_init(); assertNoError(yices_lib)
     yices_lib
   }

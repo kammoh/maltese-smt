@@ -13,11 +13,11 @@ javacOptions ++= Seq("-source", "1.8", "-target", "1.8")
 
 
 // JNA for SMT Solver bindings
-libraryDependencies += "net.java.dev.jna" % "jna" % "5.4.0"
-libraryDependencies += "net.java.dev.jna" % "jna-platform" % "5.4.0"
+libraryDependencies += "net.java.dev.jna" % "jna" % "5.8.0"
+libraryDependencies += "net.java.dev.jna" % "jna-platform" % "5.8.0"
 libraryDependencies += "com.github.com-github-javabdd" % "com.github.javabdd" % "1.0.1"
 // test dependencies
-libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.6" % "test"
+libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.8" % "test"
 // for now we depend on treadle for its VCD library
 resolvers += Resolver.sonatypeRepo("snapshots")
 libraryDependencies += "edu.berkeley.cs" %% "treadle" % "1.5-SNAPSHOT"
@@ -25,14 +25,14 @@ libraryDependencies += "edu.berkeley.cs" %% "treadle" % "1.5-SNAPSHOT"
 libraryDependencies += "edu.berkeley.cs" %% "firrtl" % "1.5-SNAPSHOT"
 
 // source layout
-scalaSource in Compile := baseDirectory.value / "src"
-resourceDirectory in Compile := baseDirectory.value / "src" / "resources"
-scalaSource in Test := baseDirectory.value / "test"
-resourceDirectory in Test := baseDirectory.value / "test" / "resources"
+Compile / scalaSource:= baseDirectory.value / "src"
+Compile / resourceDirectory := baseDirectory.value / "src" / "resources"
+Test / scalaSource := baseDirectory.value / "test"
+Test / resourceDirectory := baseDirectory.value / "test" / "resources"
 
 // publishing settings
 publishMavenStyle := true
-publishArtifact in Test := false
+Test / publishArtifact := false
 pomIncludeRepository := { x => false }
 
 // scm is set by sbt-ci-release

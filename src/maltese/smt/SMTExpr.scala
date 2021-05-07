@@ -26,9 +26,36 @@ sealed trait SMTNullaryExpr extends SMTExpr {
 }
 
 sealed trait BVExpr extends SMTExpr {
+  def numBits(c: Long):Int = math.ceil(math.log(c.toDouble)/math.log(2)).toInt
+
   def width: Int
   def tpe:               BVType = BVType(width)
   override def toString: String = SMTExprSerializer.serialize(this)
+
+  def maxOp(other: BVExpr, op: Op.Value): BVExpr = {
+    val w = width max other.width
+    val lhs = if (width < w) BVExtend(this, w - width) else this
+    val rhs = if (other.width < w) BVExtend(other, w - other.width) else other
+    BVOp(op, lhs, rhs)
+  }
+
+  def *(other: BVExpr): BVExpr = maxOp(other, Op.Mul)
+
+  def *(c: BigInt): BVExpr = this * BVLiteral(c, this.width)
+  def *(c: Int): BVExpr = this * BigInt(c)
+
+  def +(other: BVExpr): BVExpr = BVOp(Op.Add, this, other)
+  def -(other: BVExpr): BVExpr = BVOp(Op.Sub, this, other)
+
+  def >=(other: BVExpr): BVExpr = BVComparison(Compare.GreaterEqual, this, other, signed = false)
+  def >(other: BVExpr): BVExpr = BVComparison(Compare.Greater, this, other, signed = false)
+  def <(other: BVExpr): BVExpr = BVComparison(Compare.GreaterEqual, other, this, signed = false)
+  def <=(other: BVExpr): BVExpr = BVComparison(Compare.Greater, other, this, signed = false)
+
+  def <(c: BigInt): BVExpr = this < BVLiteral(c, this.width)
+  def <=(c: BigInt): BVExpr = this <= BVLiteral(c, this.width)
+  def >(c: BigInt): BVExpr = this > BVLiteral(c, this.width)
+  def >=(c: BigInt): BVExpr = this >= BVLiteral(c, this.width)
 }
 case class BVLiteral(value: BigInt, width: Int) extends BVExpr with SMTNullaryExpr {
   private def minWidth = value.bitLength + (if (value <= 0) 1 else 0)
@@ -54,7 +81,7 @@ sealed trait BVUnaryExpr extends BVExpr {
   def reapply(expr: BVExpr): BVUnaryExpr
   override def children: List[BVExpr] = List(e)
 }
-case class BVExtend(e: BVExpr, by: Int, signed: Boolean) extends BVUnaryExpr {
+case class BVExtend(e: BVExpr, by: Int, signed: Boolean = false) extends BVUnaryExpr {
   assert(by >= 0, "Extension must be non-negative!")
   override val width: Int = e.width + by
   override def reapply(expr: BVExpr) = BVExtend(expr, by, signed)
@@ -83,7 +110,7 @@ sealed trait BVBinaryExpr extends BVExpr {
   def reapply(nA: BVExpr, nB: BVExpr): BVBinaryExpr
 }
 case class BVEqual(a: BVExpr, b: BVExpr) extends BVBinaryExpr {
-  assert(a.width == b.width, s"Both argument need to be the same width!")
+  assert(a.width == b.width, s"Both argument need to be the same width! ${a.width}, ${b.width}")
   override def width: Int = 1
   override def reapply(nA: BVExpr, nB: BVExpr) = BVEqual(nA, nB)
 }
@@ -109,7 +136,7 @@ object Compare extends Enumeration {
   val Greater, GreaterEqual = Value
 }
 case class BVComparison(op: Compare.Value, a: BVExpr, b: BVExpr, signed: Boolean) extends BVBinaryExpr {
-  assert(a.width == b.width, s"Both argument need to be the same width!")
+  assert(a.width == b.width, s"Both argument need to be the same width! ${a.width}, ${b.width}")
   override def width: Int = 1
   override def reapply(nA: BVExpr, nB: BVExpr) = BVComparison(op, nA, nB, signed)
 }
@@ -130,7 +157,7 @@ object Op extends Enumeration {
   val Sub = Value("sub")
 }
 case class BVOp(op: Op.Value, a: BVExpr, b: BVExpr) extends BVBinaryExpr {
-  assert(a.width == b.width, s"Both argument need to be the same width!")
+  assert(a.width == b.width, s"Both argument need to be the same width! ${a.width}, ${b.width}")
   override val width: Int = a.width
   override def reapply(nA: BVExpr, nB: BVExpr) = BVOp(op, nA, nB)
 }
@@ -241,6 +268,11 @@ object BVAnd {
   }
   def unapply(e: BVOp): Option[(BVExpr, BVExpr)] = if (e.op == Op.And) Some((e.a, e.b)) else None
 }
+
+object BVLShr {
+  def apply(e: BVExpr, v: Int): BVExpr = BVSlice(e, e.width - 1, v)
+}
+
 object BVOr {
   def apply(a: BVExpr, b: BVExpr): BVExpr = (a, b) match {
     case (True(), _)  => True()
