@@ -8,6 +8,7 @@ package maltese.smt.solvers
 
 import com.sun.jna.{Library, Native, NativeLibrary, Pointer, Platform}
 import com.sun.jna.ptr.{IntByReference, LongByReference}
+import java.nio.file.Paths
 
 trait Yices2Api extends Library {
   // needs to be called first
