@@ -26,36 +26,65 @@ sealed trait SMTNullaryExpr extends SMTExpr {
 }
 
 sealed trait BVExpr extends SMTExpr {
-  def numBits(c: Long):Int = math.ceil(math.log(c.toDouble)/math.log(2)).toInt
-
   def width: Int
   def tpe:               BVType = BVType(width)
   override def toString: String = SMTExprSerializer.serialize(this)
 
-  def maxOp(other: BVExpr, op: Op.Value): BVExpr = {
-    val w = width max other.width
-    val lhs = if (width < w) BVExtend(this, w - width) else this
-    val rhs = if (other.width < w) BVExtend(other, w - other.width) else other
-    BVOp(op, lhs, rhs)
+  def doOp[R <: BVExpr](
+    other:  BVExpr,
+    w:      Int, // result's width
+    opFunc: (BVExpr, BVExpr) => R,
+    signed: Boolean
+  ): R = {
+    val lhs = if (width < w) BVExtend(this, w - width, signed) else this // FIXME can shrink as well
+    val rhs = if (other.width < w) BVExtend(other, w - other.width, signed) else other // FIXME can shrink as well
+    opFunc(lhs, rhs)
   }
 
-  def *(other: BVExpr): BVExpr = maxOp(other, Op.Mul)
+  def doOp[R <: BVExpr](
+    other:     BVExpr,
+    widthFunc: (Int, Int) => Int,
+    opFunc:    (BVExpr, BVExpr) => R,
+    signed:    Boolean = false
+  ): R = doOp(other, widthFunc(width, other.width), opFunc, signed)
 
-  def *(c: BigInt): BVExpr = this * BVLiteral(c, this.width)
-  def *(c: Int): BVExpr = this * BigInt(c)
+  def maxOp[R <: BVExpr](other: BVExpr, opFunc: (BVExpr, BVExpr) => R): R =
+    doOp(other, (lw, rw) => lw.max(rw), (lhs, rhs) => opFunc(lhs, rhs))
 
-  def +(other: BVExpr): BVExpr = BVOp(Op.Add, this, other)
-  def -(other: BVExpr): BVExpr = BVOp(Op.Sub, this, other)
+  def sumOp[R <: BVExpr](other: BVExpr, opFunc: (BVExpr, BVExpr) => R): R =
+    doOp(other, (lw, rw) => lw + rw, (lhs, rhs) => opFunc(lhs, rhs))
 
-  def >=(other: BVExpr): BVExpr = BVComparison(Compare.GreaterEqual, this, other, signed = false)
-  def >(other: BVExpr): BVExpr = BVComparison(Compare.Greater, this, other, signed = false)
-  def <(other: BVExpr): BVExpr = BVComparison(Compare.GreaterEqual, other, this, signed = false)
-  def <=(other: BVExpr): BVExpr = BVComparison(Compare.Greater, other, this, signed = false)
+  def maxOp(other: BVExpr, op: Op.Value): BVOp = maxOp(other, (lhs, rhs) => BVOp(op, lhs, rhs))
 
-  def <(c: BigInt): BVExpr = this < BVLiteral(c, this.width)
-  def <=(c: BigInt): BVExpr = this <= BVLiteral(c, this.width)
-  def >(c: BigInt): BVExpr = this > BVLiteral(c, this.width)
-  def >=(c: BigInt): BVExpr = this >= BVLiteral(c, this.width)
+  def maxOp(other: BVExpr, op: Compare.Value, signed: Boolean = false): BVComparison =
+    maxOp(other, (lhs, rhs) => BVComparison(op, lhs, rhs, signed))
+
+  def sumOp(other: BVExpr, op: Op.Value): BVOp = sumOp(other, (lhs, rhs) => BVOp(op, lhs, rhs))
+
+  def *(other: BVExpr): BVOp = sumOp(other, Op.Mul)
+  def *(c: BigInt): BVOp = {
+    val w = (((BigInt(1) << this.width) - 1) * c).bitLength
+    doOp(BVLiteral(c, w), w, (lhs, rhs) => BVOp(Op.Mul, lhs, rhs), false)
+  }
+
+  def +(other: BVExpr): BVOp = maxOp(other, Op.Add)
+  def -(other: BVExpr): BVOp = maxOp(other, Op.Sub)
+
+  def >(other:   BVExpr): BVComparison = maxOp(other, Compare.Greater, false)
+  def >=(other:  BVExpr): BVComparison = maxOp(other, Compare.GreaterEqual, false)
+  def <(other:   BVExpr): BVComparison = other > this
+  def <=(other:  BVExpr): BVComparison = other >= this
+  def ===(other: BVExpr): BVEqual = maxOp(other, (lhs, rhs) => BVEqual(lhs, rhs))
+  def unary_! = BVNot(this)
+  def unary_~ = BVNegate(this)
+
+  def <(c:  BigInt): BVComparison = this < BVLiteral(c)
+  def <=(c: BigInt): BVComparison = this <= BVLiteral(c)
+  def >(c:  BigInt): BVComparison = this > BVLiteral(c)
+  def >=(c: BigInt): BVComparison = this >= BVLiteral(c)
+
+  def >>(c: Int): BVSlice = BVSlice(this, this.width - 1, c)
+  def <<(c: Int): BVConcat = BVConcat(this, BVLiteral(0, c))
 }
 case class BVLiteral(value: BigInt, width: Int) extends BVExpr with SMTNullaryExpr {
   private def minWidth = value.bitLength + (if (value <= 0) 1 else 0)
@@ -67,6 +96,7 @@ object BVLiteral {
   def apply(nums: String): BVLiteral = nums.head match {
     case 'b' => BVLiteral(BigInt(nums.drop(1), 2), nums.length - 1)
   }
+  def apply(value: BigInt): BVLiteral = BVLiteral(value, value.bitLength)
 }
 case class BVSymbol(name: String, width: Int) extends BVExpr with SMTSymbol {
   assert(!name.contains("|"), s"Invalid id $name contains escape character `|`")
@@ -86,6 +116,15 @@ case class BVExtend(e: BVExpr, by: Int, signed: Boolean = false) extends BVUnary
   override val width: Int = e.width + by
   override def reapply(expr: BVExpr) = BVExtend(expr, by, signed)
 }
+
+object BVExtendTo {
+  def apply(e: BVExpr, to: Int, signed: Boolean = false) = if (e.width < to) BVExtend(e, to - e.width) else e
+}
+
+object BVResizeTo {
+  def apply(e: BVExpr, to: Int, signed: Boolean = false) = if (e.width < to) BVExtend(e, to - e.width) else if (e.width > to) BVSlice(e, to - 1, 0) else e
+}
+
 // also known as bit extract operation
 case class BVSlice(e: BVExpr, hi: Int, lo: Int) extends BVUnaryExpr {
   assert(lo >= 0, s"lo (lsb) must be non-negative!")
@@ -267,10 +306,6 @@ object BVAnd {
     else { nonTriviallyTrue.reduce(apply) }
   }
   def unapply(e: BVOp): Option[(BVExpr, BVExpr)] = if (e.op == Op.And) Some((e.a, e.b)) else None
-}
-
-object BVLShr {
-  def apply(e: BVExpr, v: Int): BVExpr = BVSlice(e, e.width - 1, v)
 }
 
 object BVOr {
